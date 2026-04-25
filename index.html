@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF Flipbook</title>
+
+<!-- PDF.js from CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<!-- StPageFlip from jsDelivr CDN -->
+<script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
+
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Playfair+Display:wght@500;700&display=swap" rel="stylesheet">
+
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #1a1a1e;
+    --surface: #242428;
+    --surface-hover: #2e2e33;
+    --border: #38383f;
+    --text: #e8e8ec;
+    --text-dim: #8e8e96;
+    --accent: #c9a55a;
+    --shadow: rgba(0, 0, 0, 0.5);
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.8rem 1.6rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .toolbar .file-name {
+    font-family: 'Playfair Display', serif;
+    font-weight: 700;
+    font-size: 1.1rem;
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .toolbar .file-name span { color: var(--accent); }
+
+  .toolbar-center {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .toolbar-center button {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, border-color 0.2s;
+    font-size: 1.1rem;
+  }
+
+  .toolbar-center button:hover { background: var(--surface-hover); border-color: var(--accent); }
+
+  .page-indicator {
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    min-width: 80px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .toolbar-right button {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 1rem;
+    transition: background 0.2s, border-color 0.2s;
+  }
+
+  .toolbar-right button:hover { background: var(--surface-hover); border-color: var(--accent); }
+
+  /* ── Flipbook area ── */
+  .flipbook-wrapper {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    position: relative;
+    overflow: hidden;
+    background: radial-gradient(ellipse at center, rgba(201,165,90,0.04) 0%, transparent 70%);
+    touch-action: none;
+  }
+
+  #flipbook-container {
+    box-shadow: 0 20px 60px var(--shadow), 0 0 0 1px rgba(255,255,255,0.04);
+    border-radius: 4px;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  /* Hide page edges that peek during flip animation */
+  #flipbook-container .stf__parent {
+    overflow: hidden;
+  }
+
+  .page-canvas {
+    display: block;
+    background: #fff;
+    position: relative;
+    overflow: hidden;
+    /* Ensure each page is a stacking context so nothing bleeds through */
+    isolation: isolate;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+
+  /* Hide cloned pages that StPageFlip places underneath during animation */
+  #flipbook-container .stf__block {
+    background: var(--bg);
+  }
+
+  .page-canvas a.pdf-link {
+    position: absolute;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    z-index: 2;
+    transition: background 0.15s;
+  }
+
+  .page-canvas a.pdf-link:hover {
+    background: rgba(201, 165, 90, 0.15);
+    outline: 1px solid rgba(201, 165, 90, 0.4);
+    border-radius: 2px;
+  }
+
+  /* ── Nav arrows ── */
+  .nav-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 1.3rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    transition: background 0.2s, border-color 0.2s, opacity 0.2s;
+    opacity: 0.7;
+  }
+
+  .nav-arrow:hover { opacity: 1; border-color: var(--accent); background: var(--surface-hover); }
+  .nav-arrow.left { left: 1rem; }
+  .nav-arrow.right { right: 1rem; }
+
+  /* ── Loading overlay ── */
+  #loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.2rem;
+  }
+
+  #loading-overlay h2 {
+    font-family: 'Playfair Display', serif;
+    font-weight: 700;
+    font-size: 1.6rem;
+  }
+
+  #loading-overlay h2 span { color: var(--accent); }
+
+  .spinner {
+    width: 44px; height: 44px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  #loading-text { color: var(--text-dim); font-size: 0.95rem; }
+
+  .progress-bar-track {
+    width: min(300px, 70vw);
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+  }
+
+  /* ── Error state ── */
+  #error-screen {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 100;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  #error-screen .error-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+  #error-screen h2 { font-family: 'Playfair Display', serif; font-size: 1.4rem; }
+  #error-screen p { color: var(--text-dim); font-size: 0.95rem; max-width: 420px; line-height: 1.6; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Responsive ── */
+  @media (max-width: 640px) {
+    .toolbar { padding: 0.6rem 0.8rem; }
+    .toolbar .file-name { font-size: 0.95rem; max-width: 160px; }
+    .nav-arrow { width: 36px; height: 36px; font-size: 1rem; }
+    .nav-arrow.left { left: 0.3rem; }
+    .nav-arrow.right { right: 0.3rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Toolbar ── -->
+<div class="toolbar">
+  <div class="file-name">SOMulation <span>B&S the Musical</span></div>
+  <div class="toolbar-center">
+    <button onclick="prevPage()" title="Previous page">‹</button>
+    <span class="page-indicator" id="page-indicator">— / —</span>
+    <button onclick="nextPage()" title="Next page">›</button>
+  </div>
+  <div class="toolbar-right">
+    <button onclick="zoomOut()" title="Zoom out">−</button>
+    <span class="page-indicator" id="zoom-indicator">100%</span>
+    <button onclick="zoomIn()" title="Zoom in">+</button>
+    <a href="./doc/doc.pdf" download style="margin-left:0.4rem;width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none;transition:background 0.2s,border-color 0.2s;" title="Download PDF" onmouseover="this.style.background='var(--surface-hover)';this.style.borderColor='var(--accent)'" onmouseout="this.style.background='transparent';this.style.borderColor='var(--border)'">↓</a>
+  </div>
+</div>
+
+<!-- ── Flipbook ── -->
+<div class="flipbook-wrapper">
+  <button class="nav-arrow left" onclick="prevPage()" title="Previous">‹</button>
+  <div id="flipbook-container"></div>
+  <button class="nav-arrow right" onclick="nextPage()" title="Next">›</button>
+</div>
+
+<!-- ── Loading ── -->
+<div id="loading-overlay">
+  <h2>Program <span>The SOMulation</span></h2>
+  <div class="spinner"></div>
+  <div id="loading-text">Loading Program</div>
+  <div class="progress-bar-track">
+    <div class="progress-bar-fill" id="progress-bar"></div>
+  </div>
+</div>
+
+<!-- ── Error ── -->
+<div id="error-screen">
+  <div class="error-icon">⚠</div>
+  <h2>Could not load PDF</h2>
+  <p id="error-message">Make sure the PDF file exists at the specified path.</p>
+</div>
+
+<script>
+// ╔══════════════════════════════════════════════════════════════╗
+// ║  CONFIGURATION                                              ║
+// ║  Change this to the path of your PDF relative to            ║
+// ║  index.html in your GitHub repo.                            ║
+// ╚══════════════════════════════════════════════════════════════╝
+const PDF_PATH = './doc/doc.pdf';
+
+
+// ── PDF.js worker ──
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ── State ──
+let pageFlip = null;
+let pdfDocGlobal = null;  // keep reference for internal link navigation
+let currentScale = 1;
+const SCALE_STEP = 0.15;
+const BASE_DPI = 1.8;
+let totalPages = 0;
+let pageWidth = 0;
+let pageHeight = 0;
+let pdfAspectRatio = 1;
+let nativePageWidth = 0;
+let nativePageHeight = 0;
+let displayScale = 1;          // base display scale (PDF units → CSS pixels)
+let lastRenderedZoom = 1;      // the zoom level pages were last rendered at
+let reRenderTimer = null;      // debounce timer for re-rendering
+let pageDivsGlobal = [];       // references to all page divs for re-rendering
+
+// ── DOM ──
+const loadingOverlay = document.getElementById('loading-overlay');
+const loadingText    = document.getElementById('loading-text');
+const progressBar    = document.getElementById('progress-bar');
+const errorScreen    = document.getElementById('error-screen');
+const errorMessage   = document.getElementById('error-message');
+const flipbookContainer = document.getElementById('flipbook-container');
+const flipbookWrapper   = document.querySelector('.flipbook-wrapper');
+const pageIndicator  = document.getElementById('page-indicator');
+const zoomIndicator  = document.getElementById('zoom-indicator');
+
+// ── Auto-load on page ready ──
+document.addEventListener('DOMContentLoaded', () => loadPDF(PDF_PATH));
+
+function calcPageSize() {
+  const toolbarH = document.querySelector('.toolbar').offsetHeight;
+  const pad = 40;
+  const arrowSpace = 120; // room for nav arrows on sides
+  const availW = window.innerWidth - arrowSpace;
+  const availH = window.innerHeight - toolbarH - pad * 2;
+
+  // Check if viewport is wide enough for a 2-page spread
+  // A spread needs: 2 × (pageHeight × aspectRatio) ≤ availW
+  const spreadPageW = (availH * pdfAspectRatio);
+  const spreadFits = (spreadPageW * 2) <= availW;
+
+  let w, h;
+  if (spreadFits) {
+    // Spread mode: size by height, ensure 2 pages fit width
+    h = availH;
+    w = h * pdfAspectRatio;
+    // Double-check width constraint
+    if (w * 2 > availW) {
+      w = availW / 2;
+      h = w / pdfAspectRatio;
+    }
+  } else {
+    // Portrait / narrow: single page, fit to height then clamp width
+    h = availH;
+    w = h * pdfAspectRatio;
+    if (w > availW) {
+      w = availW;
+      h = w / pdfAspectRatio;
+    }
+  }
+
+  pageWidth  = Math.round(w);
+  pageHeight = Math.round(h);
+}
+
+/**
+ * Extract link annotations from a PDF page and create
+ * absolutely-positioned <a> elements over the canvas.
+ *
+ * PDF coordinate system: origin at BOTTOM-left, y goes UP.
+ * HTML coordinate system: origin at TOP-left, y goes DOWN.
+ * So we flip the y-axis when positioning.
+ */
+async function buildAnnotationLinks(page, container) {
+  const annotations = await page.getAnnotations();
+  const linkAnnotations = annotations.filter(a => a.subtype === 'Link');
+
+  for (const annot of linkAnnotations) {
+    const rect = annot.rect; // [x1, y1, x2, y2] in PDF coords (bottom-left origin)
+
+    // Convert PDF coords → display coords
+    const scaleX = pageWidth / nativePageWidth;
+    const scaleY = pageHeight / nativePageHeight;
+
+    const left   = rect[0] * scaleX;
+    const bottom = rect[1] * scaleY;
+    const right  = rect[2] * scaleX;
+    const top    = rect[3] * scaleY;
+
+    // Flip y: PDF y=0 is bottom, HTML y=0 is top
+    const cssTop    = pageHeight - top;
+    const cssHeight = top - bottom;
+    const cssLeft   = left;
+    const cssWidth  = right - left;
+
+    const link = document.createElement('a');
+    link.className = 'pdf-link';
+    link.style.left   = cssLeft + 'px';
+    link.style.top    = cssTop + 'px';
+    link.style.width  = cssWidth + 'px';
+    link.style.height = cssHeight + 'px';
+
+    // ── External URL ──
+    if (annot.url) {
+      link.href = annot.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.title = annot.url;
+    }
+    // ── Internal destination (go-to page) ──
+    else if (annot.dest) {
+      link.href = '#';
+      link.title = 'Go to page';
+      const dest = annot.dest;
+      link.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          let destArray = dest;
+          // If dest is a named destination (string), resolve it
+          if (typeof dest === 'string' && pdfDocGlobal) {
+            destArray = await pdfDocGlobal.getDestination(dest);
+          }
+          if (destArray && pdfDocGlobal) {
+            const ref = destArray[0];
+            const pageIndex = await pdfDocGlobal.getPageIndex(ref);
+            if (pageFlip) {
+              pageFlip.flip(pageIndex);
+            }
+          }
+        } catch (err) {
+          console.warn('Could not resolve internal link:', err);
+        }
+      });
+    }
+    // ── Named action (e.g. GoToPage via action dict) ──
+    else if (annot.action === 'GoTo' && annot.dest) {
+      // handled above
+    } else {
+      // Unknown link type — skip
+      continue;
+    }
+
+    container.appendChild(link);
+  }
+}
+
+async function loadPDF(path) {
+  try {
+    loadingText.textContent = 'Fetching PDF…';
+    const pdfDoc = await pdfjsLib.getDocument(path).promise;
+    pdfDocGlobal = pdfDoc;
+    totalPages = pdfDoc.numPages;
+
+    // Get native dimensions from first page
+    const firstPage = await pdfDoc.getPage(1);
+    const vp0 = firstPage.getViewport({ scale: 1 });
+    pdfAspectRatio = vp0.width / vp0.height;
+    nativePageWidth  = vp0.width;
+    nativePageHeight = vp0.height;
+
+    // Size pages to fit viewport
+    calcPageSize();
+    displayScale = pageWidth / vp0.width;
+
+    // Render all pages + extract annotations
+    const pageDivs = [];
+    pageDivsGlobal = [];
+    for (let i = 1; i <= totalPages; i++) {
+      loadingText.textContent = `Rendering page ${i} of ${totalPages}…`;
+      progressBar.style.width = Math.round((i / totalPages) * 100) + '%';
+
+      const page = await pdfDoc.getPage(i);
+      const hiresScale = displayScale * BASE_DPI * window.devicePixelRatio;
+      const vp = page.getViewport({ scale: hiresScale });
+
+      // Create canvas
+      const canvas  = document.createElement('canvas');
+      canvas.width  = vp.width;
+      canvas.height = vp.height;
+      canvas.style.width  = pageWidth + 'px';
+      canvas.style.height = pageHeight + 'px';
+
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+
+      // Build page container
+      const div = document.createElement('div');
+      div.className = 'page-canvas';
+      div.style.width  = pageWidth + 'px';
+      div.style.height = pageHeight + 'px';
+      div.style.background = '#fff';
+
+      if (i === 1 || i === totalPages) {
+        div.setAttribute('data-density', 'hard');
+      }
+
+      div.appendChild(canvas);
+
+      // Overlay clickable link annotations
+      await buildAnnotationLinks(page, div);
+
+      pageDivs.push(div);
+      pageDivsGlobal.push(div);
+    }
+
+    buildFlipbook(pageDivs);
+    loadingOverlay.style.display = 'none';
+
+  } catch (err) {
+    console.error(err);
+    loadingOverlay.style.display = 'none';
+    errorMessage.textContent = `Could not load "${path}". Check that the file exists and the path is correct. (${err.message})`;
+    errorScreen.style.display = 'flex';
+  }
+}
+
+function buildFlipbook(pageDivs) {
+  flipbookContainer.innerHTML = '';
+
+  if (pageFlip) {
+    try { pageFlip.destroy(); } catch (_) {}
+    pageFlip = null;
+  }
+
+  // StPageFlip switches to landscape (2-page spread) when the parent
+  // container is at least 2× the page width. We need to pre-size it.
+  const toolbarH = document.querySelector('.toolbar').offsetHeight;
+  const pad = 40;
+  const availW = window.innerWidth - pad * 2;
+  const availH = window.innerHeight - toolbarH - pad * 2;
+  const canSpread = availW >= pageWidth * 2;
+
+  flipbookContainer.style.width  = (canSpread ? pageWidth * 2 : pageWidth) + 'px';
+  flipbookContainer.style.height = pageHeight + 'px';
+
+  pageFlip = new St.PageFlip(flipbookContainer, {
+    width: pageWidth,
+    height: pageHeight,
+    size: 'fixed',
+    minWidth: pageWidth,
+    minHeight: pageHeight,
+    maxWidth: pageWidth,
+    maxHeight: pageHeight,
+    showCover: true,
+    usePortrait: true,     // allows fallback to single-page on narrow screens
+    maxShadowOpacity: 0.35,
+    mobileScrollSupport: true,
+    flippingTime: 800,
+    useMouseEvents: true,
+    swipeDistance: 30,
+    drawShadow: true,
+    autoSize: true,        // let StPageFlip manage container sizing
+    clickEventForward: true,
+  });
+
+  pageFlip.loadFromHTML(pageDivs);
+  pageFlip.on('flip', e => updatePageIndicator(e.data));
+  updatePageIndicator(0);
+}
+
+// ── Navigation ──
+function prevPage() { if (pageFlip) pageFlip.flipPrev(); }
+function nextPage() { if (pageFlip) pageFlip.flipNext(); }
+
+function updatePageIndicator(pageIndex) {
+  pageIndicator.textContent = `${pageIndex + 1} / ${totalPages}`;
+}
+
+// ── Zoom & Pan State ──
+let panX = 0, panY = 0;
+let isPanning = false;
+let panStartX = 0, panStartY = 0;
+let panStartPanX = 0, panStartPanY = 0;
+
+// Pinch state
+let initialPinchDist = 0;
+let initialPinchScale = 1;
+
+function zoomIn() {
+  currentScale = Math.min(currentScale + SCALE_STEP, 4);
+  applyZoom();
+}
+
+function zoomOut() {
+  currentScale = Math.max(currentScale - SCALE_STEP, 0.5);
+  if (currentScale <= 1) { panX = 0; panY = 0; } // reset pan when zoomed out
+  applyZoom();
+}
+
+function setZoom(newScale) {
+  currentScale = Math.max(0.5, Math.min(4, newScale));
+  if (currentScale <= 1) { panX = 0; panY = 0; }
+  applyZoom();
+}
+
+function applyZoom() {
+  flipbookContainer.style.transform = `translate(${panX}px, ${panY}px) scale(${currentScale})`;
+  flipbookContainer.style.transformOrigin = 'center center';
+  zoomIndicator.textContent = Math.round(currentScale * 100) + '%';
+
+  // When zoomed in, disable page flipping so touch gestures become panning
+  if (pageFlip) {
+    if (currentScale > 1.05) {
+      pageFlip.setting.useMouseEvents = false;
+    } else {
+      pageFlip.setting.useMouseEvents = true;
+    }
+  }
+
+  // Debounce re-render: wait until user stops zooming, then re-rasterize
+  // at the new resolution for sharp text
+  clearTimeout(reRenderTimer);
+  reRenderTimer = setTimeout(() => {
+    const effectiveZoom = Math.round(currentScale * 10) / 10; // round to 0.1
+    if (Math.abs(effectiveZoom - lastRenderedZoom) >= 0.3 && pdfDocGlobal) {
+      reRenderPages(effectiveZoom);
+    }
+  }, 400);
+}
+
+/**
+ * Re-render all page canvases at a higher resolution matching the
+ * current zoom level, so text stays crisp when zoomed in.
+ * 
+ * StPageFlip clones page elements, so we query the live DOM
+ * for all canvases inside the container rather than relying on
+ * stored references.
+ */
+async function reRenderPages(zoomLevel) {
+  if (!pdfDocGlobal) return;
+  lastRenderedZoom = zoomLevel;
+
+  const renderScale = displayScale * BASE_DPI * window.devicePixelRatio * Math.max(zoomLevel, 1);
+
+  // Find all page wrapper divs in the flipbook (both originals and clones)
+  const allCanvases = flipbookContainer.querySelectorAll('canvas');
+
+  for (const oldCanvas of allCanvases) {
+    try {
+      // Determine which PDF page this canvas belongs to.
+      // StPageFlip sets data-page on parent .stf__item elements.
+      const stfItem = oldCanvas.closest('.stf__item');
+      let pageNum = null;
+
+      if (stfItem && stfItem.dataset.page !== undefined) {
+        pageNum = parseInt(stfItem.dataset.page, 10) + 1; // 0-indexed → 1-indexed
+      } else {
+        // Fallback: find index among pageDivsGlobal
+        const parentDiv = oldCanvas.parentElement;
+        const idx = pageDivsGlobal.indexOf(parentDiv);
+        if (idx >= 0) pageNum = idx + 1;
+      }
+
+      if (!pageNum || pageNum < 1 || pageNum > totalPages) continue;
+
+      const page = await pdfDocGlobal.getPage(pageNum);
+      const vp = page.getViewport({ scale: renderScale });
+
+      const canvas = document.createElement('canvas');
+      canvas.width  = vp.width;
+      canvas.height = vp.height;
+      canvas.style.width  = pageWidth + 'px';
+      canvas.style.height = pageHeight + 'px';
+
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+
+      oldCanvas.replaceWith(canvas);
+    } catch (err) {
+      console.warn('Re-render failed:', err);
+    }
+  }
+}
+
+// ── Scroll-wheel zoom ──
+flipbookWrapper.addEventListener('wheel', e => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? -SCALE_STEP : SCALE_STEP;
+  setZoom(currentScale + delta);
+}, { passive: false });
+
+// ── Pinch-to-zoom (touch) ──
+function getTouchDist(touches) {
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.hypot(dx, dy);
+}
+
+flipbookWrapper.addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    e.preventDefault();
+    initialPinchDist  = getTouchDist(e.touches);
+    initialPinchScale = currentScale;
+  } else if (e.touches.length === 1 && currentScale > 1.05) {
+    // Start panning when zoomed in
+    isPanning = true;
+    panStartX = e.touches[0].clientX;
+    panStartY = e.touches[0].clientY;
+    panStartPanX = panX;
+    panStartPanY = panY;
+  }
+}, { passive: false });
+
+flipbookWrapper.addEventListener('touchmove', e => {
+  if (e.touches.length === 2) {
+    e.preventDefault();
+    const dist = getTouchDist(e.touches);
+    const scale = initialPinchScale * (dist / initialPinchDist);
+    setZoom(scale);
+  } else if (e.touches.length === 1 && isPanning) {
+    e.preventDefault();
+    panX = panStartPanX + (e.touches[0].clientX - panStartX);
+    panY = panStartPanY + (e.touches[0].clientY - panStartY);
+    applyZoom();
+  }
+}, { passive: false });
+
+flipbookWrapper.addEventListener('touchend', e => {
+  if (e.touches.length < 2) {
+    initialPinchDist = 0;
+  }
+  if (e.touches.length === 0) {
+    isPanning = false;
+  }
+});
+
+// ── Mouse drag to pan (when zoomed in) ──
+flipbookWrapper.addEventListener('mousedown', e => {
+  if (currentScale > 1.05) {
+    isPanning = true;
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+    panStartPanX = panX;
+    panStartPanY = panY;
+    flipbookWrapper.style.cursor = 'grabbing';
+    e.preventDefault();
+  }
+});
+
+window.addEventListener('mousemove', e => {
+  if (isPanning) {
+    panX = panStartPanX + (e.clientX - panStartX);
+    panY = panStartPanY + (e.clientY - panStartY);
+    applyZoom();
+  }
+});
+
+window.addEventListener('mouseup', () => {
+  if (isPanning) {
+    isPanning = false;
+    flipbookWrapper.style.cursor = '';
+  }
+});
+
+// ── Double-tap / double-click to toggle zoom ──
+let lastTapTime = 0;
+flipbookWrapper.addEventListener('click', e => {
+  const now = Date.now();
+  if (now - lastTapTime < 350) {
+    // Double-tap: toggle between 1× and 2×
+    if (currentScale > 1.05) {
+      setZoom(1);
+    } else {
+      setZoom(2);
+    }
+    e.preventDefault();
+  }
+  lastTapTime = now;
+});
+
+// ── Keyboard shortcuts ──
+document.addEventListener('keydown', e => {
+  if (!pageFlip) return;
+  if (e.key === 'ArrowLeft')  prevPage();
+  if (e.key === 'ArrowRight') nextPage();
+  if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomIn(); }
+  if (e.key === '-')                  { e.preventDefault(); zoomOut(); }
+});
+</script>
+
+</body>
+</html>
